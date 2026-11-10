@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wai-processing"
+version = "0.0.0"
+description = "Processing suite for the WorldAI Format (WAI) - (alpha) version"
+authors = [{ name = "Meta Reality Labs Research" }]
+requires-python = ">=3.8.0"
+dependencies = [
+    "argconf",
+    "cython",
+    "einops",
+    "imageio",
+    "natsort",
+    "ninja",
+    "numpy",
+    "omegaconf==2.4.0.dev3",
+    "open3d",
+    "opencv-python-headless==4.10.0.84",
+    "pandas",
+    "portalocker",
+    "pycolmap",
+    "pyyaml",
+    "safetensors",
+    "tqdm",
+    "tyro",
+    # used by the DRS VPT converters and the WAI I/O they share with drs_vpt
+    "h5py",
+    "huggingface_hub",
+    "orjson",
+    "plyfile",
+    "py7zr",
+    "pykitti",
+    "pyntcloud",
+    "python-box",
+    "requests",
+    "scipy",
+    "trimesh",
+    "zarr",  # grand_tour_prepare.py reads the GrandTour release
+]
+
+[project.optional-dependencies]
+## MoGe-2 masks (the non-ambiguous mask MegaDepth training uses)
+moge = ["moge @ git+https://github.com/microsoft/MoGe.git"]
+
+## Install all optional dependencies
+all = [
+    "wai-processing[moge]",
+]
+
+[tool.setuptools]
+packages = ["wai_processing"]
+
+[tool.setuptools.package-dir]
+"wai_processing" = "."

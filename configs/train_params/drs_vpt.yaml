@@ -1,0 +1,30 @@
+# Optimisation settings of the released model. resume: continue from <output_dir>/checkpoint-last.pth.
+# freeze_image_encoder: keep DINOv2 fixed (the released model was trained this way; the encoder lr below then
+# has no effect).
+seed: 0
+max_num_of_imgs_per_gpu: 15
+accum_iter: 1
+epochs: 100
+lr: 1.0e-05
+min_lr: 1.0e-06
+warmup_epochs: 10
+weight_decay: 0.05
+schedule_type: linear_warmup_half_cycle_cosine_decay
+warn_not_in_submodule: false
+submodule_configs:
+  encoder:
+    lr: 5.0e-05
+    min_lr: 5.0e-08
+    warmup_epochs: "${train_params.warmup_epochs}"
+    weight_decay: "${train_params.weight_decay}"
+    schedule_type: "${train_params.schedule_type}"
+amp: 1
+amp_dtype: bf16
+disable_cudnn_benchmark: true
+freeze_val_samples_across_all_epochs: true
+eval_freq: 1
+save_freq: 1
+keep_freq: 10
+print_freq: 20
+resume: true
+freeze_image_encoder: true

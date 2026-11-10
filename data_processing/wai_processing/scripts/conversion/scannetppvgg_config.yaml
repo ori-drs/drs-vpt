@@ -1,0 +1,9 @@
+original_root: # path of the raw dataset (see data_processing/README.md)
+root: # path of the WAI-format output
+
+dataset_name: scannetpp
+version: 0.1
+overwrite: True
+
+scene_filters:
+  - process_state_not: [conversion, finished]

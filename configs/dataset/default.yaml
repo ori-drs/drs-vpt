@@ -1,0 +1,37 @@
+# Settings shared by every dataset. A mix file (e.g. drs_vpt.yaml, kitti.yaml) sets train_dataset and test_dataset:
+# "N @ Dataset(...)" terms joined by "+", N being the number of samples per epoch.
+defaults:
+  - resolution_options: default
+  - megadepth_wai: default
+  - scannetppvgg_wai: default
+  - pandaset_wai: default
+  - nuscenes_wai: default
+  - seven_scenes_wai: default
+  - kitti_wai: default
+  - grandtour_wai: default
+  - argoverse_wai: default
+  - osd_wai: default
+  - eth3d_wai: default
+  - wildrgbd_wai: default
+
+train_dataset: ???
+test_dataset: ???
+num_workers: 12
+num_views: 4
+principal_point_centered: false
+train:
+  variable_num_views: true
+val:
+  variable_num_views: false
+
+resolution_train: ${dataset.resolution_options.518_many_ar}
+resolution_val_osd: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_megadepth: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_kitti: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_nuscenes: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_seven_scenes: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_pandaset: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_scannetppvgg: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_argoverse: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_wildrgbd: ${dataset.resolution_options.518_0_75_ar}
+resolution_val_grandtour: ${dataset.resolution_options.518_1_33_ar}

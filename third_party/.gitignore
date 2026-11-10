@@ -1,0 +1,4 @@
+# The repo-wide `outputs/` rule would drop this source package.
+!outputs/
+# Written by `CPU_ONLY=1 pip install -e third_party/cumm`.
+cumm/cumm/__build_settings__.py

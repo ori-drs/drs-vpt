@@ -1,0 +1,6 @@
+# Weights & Biases logging (off by default; TensorBoard logs always go to output_dir).
+enabled: false
+project: drs_vpt
+run_name: null
+entity: null
+resume: allow

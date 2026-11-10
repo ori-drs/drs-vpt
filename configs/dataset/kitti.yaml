@@ -1,0 +1,9 @@
+# KITTI odometry only.
+defaults:
+  - default
+
+train_dataset:
+  "+ 10_000 @ ${dataset.kitti_wai.train.dataset_str}"
+
+test_dataset:
+  "+ 1_000 @ ${dataset.kitti_wai.val.dataset_str}"

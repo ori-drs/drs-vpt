@@ -1,0 +1,6 @@
+defaults:
+  - train: default
+  - val: default
+
+# Which frames make up each sample's point cloud and how it is built (drs_vpt/datasets/cloud.py, CloudConfig)
+cloud: {grid_size: [0.005, 0.05], scanner_offset: 10, max_points: 38912}

@@ -1,0 +1,8 @@
+# Filled in from the torchrun environment.
+world_size: 1
+local_rank: -1
+dist_url: "env://"
+rank: 0
+gpu: 0
+distributed: false
+dist_backend: nccl

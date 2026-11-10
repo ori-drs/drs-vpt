@@ -1,0 +1,23 @@
+dataset_str:
+  "ETH3DWAI(
+    resolution=${dataset.eth3d_wai.train.dataset_resolution},
+    principal_point_centered=${dataset.eth3d_wai.train.principal_point_centered},
+    seed=${dataset.eth3d_wai.train.seed},
+    transform='${dataset.eth3d_wai.train.transform}',
+    data_norm_type='${dataset.eth3d_wai.train.data_norm_type}',
+    ROOT='${dataset.eth3d_wai.train.ROOT}',
+    dataset_metadata_dir='${dataset.eth3d_wai.train.dataset_metadata_dir}',
+    variable_num_views=${dataset.eth3d_wai.train.variable_num_views},
+    num_views=${dataset.eth3d_wai.train.num_views},
+    covisibility_thres=${dataset.eth3d_wai.train.covisibility_thres},
+    cloud=${dataset.eth3d_wai.cloud})"
+dataset_resolution: "${dataset.resolution_train}"
+principal_point_centered: "${dataset.principal_point_centered}"
+seed: 777
+transform: imgnorm
+data_norm_type: "${model.data_norm_type}"
+ROOT: "${root_data_dir}/eth3d"
+dataset_metadata_dir: "${mapanything_dataset_metadata_dir}"
+variable_num_views: "${dataset.train.variable_num_views}"
+num_views: "${dataset.num_views}"
+covisibility_thres: 0.25

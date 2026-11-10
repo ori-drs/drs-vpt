@@ -1,0 +1,9 @@
+defaults:
+  - default
+
+# Root directory containing all datasets (WAI format, data_processing/README.md)
+root_data_dir: /data/wai
+# Dataset metadata directory (scene lists, data_processing/aggregate_scene_names.py)
+metadata_dir: /data/wai_meta
+# Root directory to log experiments
+root_experiments_dir: ./experiments

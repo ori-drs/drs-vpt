@@ -1,0 +1,1074 @@
+# Changes made for DRS VPT to MapAnything files, against the MapAnything public release (9f36303).
+# Paths are MapAnything's; the ported copies also have their imports rewritten for drs_vpt.
+diff --git a/data_processing/wai_processing/scripts/covisibility.py b/data_processing/wai_processing/scripts/covisibility.py
+--- a/data_processing/wai_processing/scripts/covisibility.py
++++ b/data_processing/wai_processing/scripts/covisibility.py
+@@ -28,6 +28,66 @@
+ 
+ logger = logging.getLogger(__name__)
+ 
++# -----------------------------
++# Sampling / padding helper
++# -----------------------------
++@torch.no_grad()
++def sample_or_pad_points(pts: torch.Tensor, target_n: int = 1500, pad_value: float = 1e6) -> torch.Tensor:
++    """
++    pts: (N,3)
++    returns: (target_n,3)
++      - if N >= target_n: uniform random sample without replacement
++      - if N <  target_n: pad with a constant far-away point
++    """
++    assert pts.ndim == 2 and pts.shape[1] == 3
++    device = pts.device
++    N = pts.shape[0]
++
++    if N >= target_n:
++        idx = torch.randperm(N, device=device)[:target_n]
++        return pts[idx]
++
++    pad = torch.full((target_n - N, 3), pad_value, device=device, dtype=pts.dtype)
++    return torch.cat([pts, pad], dim=0)
++
++
++# -----------------------------
++# Batched counts: fixed i vs many js
++# -----------------------------
++@torch.no_grad()
++def batched_counts_fixed_i(
++    pi: torch.Tensor,         # (N,3) (already sampled/padded to TARGET_N)
++    pjs: torch.Tensor,        # (K,N,3) (already sampled/padded to TARGET_N)
++    r: float = 0.10,
++    mode: str = "hits",       # "hits" or "pairs"
++) -> torch.Tensor:
++    """
++    returns: (K,) counts on CPU (int64)
++      - mode="pairs": number of (pi,pj) pairs within r
++      - mode="hits" : number of pi points that have >=1 pj within r
++    """
++    assert pi.ndim == 2 and pi.shape[1] == 3
++    assert pjs.ndim == 3 and pjs.shape[2] == 3
++    assert pjs.shape[1] == pi.shape[0]
++
++    r2 = float(r) * float(r)
++
++    pi2  = (pi * pi).sum(-1).view(1, -1, 1)                 # (1,N,1)
++    pjs2 = (pjs * pjs).sum(-1).view(pjs.shape[0], 1, -1)    # (K,1,N)
++    dots = torch.einsum("ic,kjc->kij", pi, pjs)             # (K,N,N)
++
++    d2 = (pi2 + pjs2 - 2.0 * dots).clamp_min_(0.0)          # (K,N,N)
++    within = d2 <= r2
++
++    if mode == "pairs":
++        counts = within.sum(dim=(1, 2))                     # (K,)
++    elif mode == "hits":
++        counts = within.any(dim=2).sum(dim=1)               # (K,)
++    else:
++        raise ValueError('mode must be "hits" or "pairs"')
++
++    return counts.to(torch.int64).cpu()
++
+ 
+ def compute_covisibility(cfg, scene_name: str, overwrite=False):
+     scene_root = Path(cfg.root) / scene_name
+@@ -65,79 +125,136 @@
+         range(num_frames),
+         f"Computing exhaustive pairwise covisibility for each view ({scene_name})",
+     ):
+-        # Get the remaining views which pass the frustum intersection check
+-        if cfg.get("perform_frustum_check", True) and frustum_intersection is not None:
+-            ov_inds = frustum_intersection[idx].argwhere()[:, 0].to(device)
+-        else:
++
++        if cfg.denominator_mode == "thresh_1000":
++
+             ov_inds = torch.arange(num_frames).to(device)
+-        if len(ov_inds) == 0:
+-            continue
++            if len(ov_inds) == 0:
++                continue
++
++            # Process overlapping views in sub-chunks if needed
++            overlap_score = torch.zeros((num_frames,), device="cpu")
++            ov_chunk_size = 80
++            for ov_start in range(0, len(ov_inds), ov_chunk_size):
++                ov_end = min(ov_start + ov_chunk_size, len(ov_inds))
++                ov_inds_chunk = ov_inds[ov_start:ov_end]
++                v_rem = len(ov_inds_chunk)
++                if v_rem == 0:
++                    continue
++
++                # -----------------------------
++                # Full pipeline snippet
++                # -----------------------------
++                TARGET_N = 1500
++
++                # fixed i (pad negative)
++                pi = world_pts3d[idx].to(device).reshape(depth_h, depth_w, -1)[valid_depth_masks[idx]][..., :3]
++                pi = sample_or_pad_points(pi, TARGET_N, pad_value=-1e6)
++
++                # contiguous js (pad positive)
++                js = list(range(ov_start, ov_end))
++                pjs = torch.stack([
++                    sample_or_pad_points(
++                        world_pts3d[j].to(device).reshape(depth_h, depth_w, -1)[valid_depth_masks[j]][..., :3],
++                        TARGET_N,
++                        pad_value=1e6,
++                    )
++                    for j in js
++                ], dim=0)  # (K,1500,3)
++
++                # counts in one call
++                counts_hits = batched_counts_fixed_i(pi, pjs, r=cfg.get("hit_radius", 1.0), mode="hits")  # (K,)
++
++                overlap_score[ov_inds_chunk.cpu()] = counts_hits.cpu().float()
+ 
+-        # Process overlapping views in sub-chunks if needed
+-        overlap_score = torch.zeros((num_frames,), device="cpu")
+-        ov_chunk_size = 4000
+-        for ov_start in range(0, len(ov_inds), ov_chunk_size):
+-            ov_end = min(ov_start + ov_chunk_size, len(ov_inds))
+-            ov_inds_chunk = ov_inds[ov_start:ov_end]
+-            v_rem = len(ov_inds_chunk)
+-            if v_rem == 0:
++            # Update the pairwise overlap matrix
++            pairwise_covisibility[idx] = overlap_score
++            torch.cuda.empty_cache()
++
++        else:
++            # Get the remaining views which pass the frustum intersection check
++            if cfg.get("perform_frustum_check", True) and frustum_intersection is not None:
++                ov_inds = frustum_intersection[idx].argwhere()[:, 0].to(device)
++            else:
++                ov_inds = torch.arange(num_frames).to(device)
++            if len(ov_inds) == 0:
+                 continue
+ 
+-            # Project the depth map using utility function
+-            reprojected_pts, valid_mask, _ = project_points_to_views(
+-                idx,
+-                ov_inds_chunk,
+-                depth_h,
+-                depth_w,
+-                valid_depth_masks,
+-                cam2worlds,
+-                world_pts3d,
+-                intrinsics,
+-                device,
+-            )
+-
+-            # If any points are valid, compute the covisibility
+-            if valid_mask.any():
+-                # Sample depths at reprojected points
+-                depth_lu, expected_depth = sample_depths_at_reprojections(
+-                    reprojected_pts, depths, ov_inds_chunk, depth_h, depth_w, device
+-                )
+-                # Calculate reprojection error and depth association threshold
+-                reprojection_error = torch.abs(expected_depth - depth_lu)
+-                depth_assoc_thres = (
+-                    cfg.depth_assoc_error_thres
+-                    + cfg.depth_assoc_rel_error_thres * expected_depth
+-                    - math.log(0.5) * cfg.depth_assoc_error_temp
++            # Process overlapping views in sub-chunks if needed
++            overlap_score = torch.zeros((num_frames,), device="cpu")
++            ov_chunk_size = 40
++            for ov_start in range(0, len(ov_inds), ov_chunk_size):
++                ov_end = min(ov_start + ov_chunk_size, len(ov_inds))
++                ov_inds_chunk = ov_inds[ov_start:ov_end]
++                v_rem = len(ov_inds_chunk)
++                if v_rem == 0:
++                    continue
++
++                # Project the depth map using utility function
++                reprojected_pts, valid_mask, _ = project_points_to_views(
++                    idx,
++                    ov_inds_chunk,
++                    depth_h,
++                    depth_w,
++                    valid_depth_masks,
++                    cam2worlds,
++                    world_pts3d,
++                    intrinsics,
++                    device,
+                 )
+-                valid_depth_projection = (
+-                    reprojection_error < depth_assoc_thres
+-                ) & valid_mask
+-
+-                # Calculate covisibility score based on denominator mode
+-                if cfg.denominator_mode == "valid_target_depth":
+-                    # divide by the number of valid depth points in the target view
+-                    comp_covisibility_score = valid_depth_projection.sum(
+-                        [1, 2]
+-                    ) / valid_depth_masks[ov_inds_chunk].sum([1, 2]).clamp(1)
+-                    comp_covisibility_score = comp_covisibility_score.clamp(
+-                        0, 1
+-                    )  # in case in the target view there more valid depth points than in the source view
+-                elif cfg.denominator_mode == "full":
+-                    # divide by the total number of pixels
+-                    comp_covisibility_score = valid_depth_projection.sum([1, 2]) / (
+-                        depth_h * depth_w
++
++                # If any points are valid, compute the covisibility
++                if valid_mask.any():
++                    # Sample depths at reprojected points
++                    depth_lu, expected_depth = sample_depths_at_reprojections(
++                        reprojected_pts, depths, ov_inds_chunk, depth_h, depth_w, device
+                     )
+-                else:
+-                    raise NotImplementedError(
+-                        f"denominator_mode not supported: {cfg.denominator_mode}"
++                    # Calculate reprojection error and depth association threshold
++                    reprojection_error = torch.abs(expected_depth - depth_lu)
++                    depth_assoc_thres = (
++                        cfg.depth_assoc_error_thres
++                        + cfg.depth_assoc_rel_error_thres * expected_depth
++                        - math.log(0.5) * cfg.depth_assoc_error_temp
+                     )
+-                overlap_score[ov_inds_chunk.cpu()] = comp_covisibility_score.cpu()
+-
+-        # Update the pairwise overlap matrix
+-        pairwise_covisibility[idx] = overlap_score
+-
+-        # Free memory
+-        torch.cuda.empty_cache()
++                    valid_depth_projection = (
++                        reprojection_error < depth_assoc_thres
++                    ) & valid_mask
++
++                    # Calculate covisibility score based on denominator mode
++                    if cfg.denominator_mode == "valid_target_depth":
++                        # divide by the number of valid depth points in the target view
++                        comp_covisibility_score = valid_depth_projection.sum(
++                            [1, 2]
++                        ) / valid_depth_masks[ov_inds_chunk].sum([1, 2]).clamp(1)
++                        comp_covisibility_score = comp_covisibility_score.clamp(
++                            0, 1
++                        )  # in case in the target view there more valid depth points than in the source view
++                    elif cfg.denominator_mode == "full":
++                        # divide by the total number of pixels
++                        comp_covisibility_score = valid_depth_projection.sum([1, 2]) / (
++                            depth_h * depth_w
++                        )
++                    else:
++                        raise NotImplementedError(
++                            f"denominator_mode not supported: {cfg.denominator_mode}"
++                        )
++                    overlap_score[ov_inds_chunk.cpu()] = comp_covisibility_score.cpu()
++
++            # Update the pairwise overlap matrix
++            pairwise_covisibility[idx] = overlap_score
++
++            # Free memory
++            torch.cuda.empty_cache()
++
++    def symmetrize_and_row_normalize(C: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
++        C_sym = torch.minimum(C, C.T)
++        d = torch.diag(C_sym).clamp_min(eps)
++        return C_sym / d[:, None]
++
++    # Hit counts are made symmetric and normalised by each frame's own count; the depth-reprojection scores are
++    # already in [0, 1] and stay as computed (asymmetric), as in MapAnything.
++    if cfg.denominator_mode == "thresh_1000":
++        pairwise_covisibility = symmetrize_and_row_normalize(pairwise_covisibility)
+ 
+     mmap_store_name = store_data(
+         scene_root / cfg.out_path / "pairwise_covisibility.npy",
+@@ -181,9 +298,6 @@
+     scene_names = get_scene_names(
+         cfg, shuffle=cfg.get("random_scene_processing_order", True)
+     )
+-    scene_names = get_scene_names(
+-        cfg, shuffle=cfg.get("random_scene_processing_order", True)
+-    )
+     logger.info(f"processing: {len(scene_names)} scenes")
+     logger.debug(f"scene_names = {scene_names}")
+ 
+diff --git a/data_processing/wai_processing/utils/covis_utils.py b/data_processing/wai_processing/utils/covis_utils.py
+--- a/data_processing/wai_processing/utils/covis_utils.py
++++ b/data_processing/wai_processing/utils/covis_utils.py
+@@ -215,7 +215,7 @@
+ 
+     # Compute batched frustum intersection check
+     frustum_intersection = frustum_intersection_check(
+-        frustums_world, chunk_size=500, device=device
++        frustums_world, chunk_size=50, device=device
+     )
+ 
+     # Free up memory by removing unneeded tensors
+diff --git a/data_processing/wai_processing/scripts/conversion/megadepth.py b/data_processing/wai_processing/scripts/conversion/megadepth.py
+--- a/data_processing/wai_processing/scripts/conversion/megadepth.py
++++ b/data_processing/wai_processing/scripts/conversion/megadepth.py
+@@ -5,6 +5,7 @@
+ 
+ import logging
+ import os
++import shutil
+ from pathlib import Path
+ 
+ import cv2
+@@ -265,7 +266,7 @@
+ 
+         # Symlink original image to WAI path
+         rel_target_image_path = Path("images") / image_id
+-        os.symlink(img_path, target_scene_root / rel_target_image_path)
++        shutil.copy2(img_path, target_scene_root / rel_target_image_path)
+ 
+         # Load depth map from H5 file
+         with h5py.File(depth_path, "r") as hd5:
+diff --git a/data_processing/wai_processing/scripts/conversion/eth3d.py b/data_processing/wai_processing/scripts/conversion/eth3d.py
+--- a/data_processing/wai_processing/scripts/conversion/eth3d.py
++++ b/data_processing/wai_processing/scripts/conversion/eth3d.py
+@@ -6,6 +6,7 @@
+ import os
+ from pathlib import Path
+ 
++import cv2
+ import numpy as np
+ import pycolmap
+ import torch
+@@ -13,6 +14,7 @@
+ from natsort import natsorted
+ from PIL import Image
+ from scipy.spatial.transform import Rotation
++from tqdm import tqdm
+ from wai_processing.utils.globals import WAI_PROC_CONFIG_PATH
+ from wai_processing.utils.wrapper import (
+     convert_scenes_wrapper,
+@@ -336,7 +338,7 @@
+ 
+     # Precompute distorted image coordinates for each camera ID
+     distorted_img_coords_dict = {}
+-    for camera_id, undistorted_camera in undistorted_camera_params_dict.items():
++    for camera_id, undistorted_camera in tqdm(undistorted_camera_params_dict.items()):
+         # Generate image points grid
+         height, width = undistorted_camera.height, undistorted_camera.width
+         grid_x, grid_y = np.meshgrid(np.arange(width), np.arange(height))
+@@ -580,6 +582,8 @@
+         rel_target_image_path = Path("images") / target_image_name
+         rel_depth_out_path = Path("depth") / f"{frame_name}.exr"
+ 
++        max_dimension = 1080
++        rescale_factor = max_dimension / max(width, height)
+         # Check if image is originally portrait
+         is_portrait = False
+         if (
+@@ -607,23 +611,40 @@
+             fx, fy, cx, cy = adjusted_params
+             c2w_pose = adjust_pose_for_rotation(c2w_pose, k=1)
+ 
++            img = Image.fromarray(cv2.resize(np.array(img), None, fx=rescale_factor, fy=rescale_factor,
++                                   interpolation=cv2.INTER_LANCZOS4))
+             # Save rotated image to target location
+             img.save(target_scene_root / rel_target_image_path)
+ 
++            depth = cv2.resize(np.array(depth), None, fx=rescale_factor, fy=rescale_factor,
++                                   interpolation=cv2.INTER_NEAREST_EXACT)
++
+             # Save rotated depth to target location
+             store_data(
+                 target_scene_root / rel_depth_out_path,
+                 torch.tensor(depth),
+                 "depth",
+             )
+-
+-            # Update the height & width
+-            height = depth.shape[0]
+-            width = depth.shape[1]
+         else:
+-            # For non-rotated images, create symlinks to the original files
+-            os.symlink(image_path, target_scene_root / rel_target_image_path)
+-            os.symlink(depth_path, target_scene_root / rel_depth_out_path)
++            img = Image.open(image_path)
++            depth = load_data(depth_path, "depth").numpy()
++
++            img = Image.fromarray(cv2.resize(np.array(img), None, fx=rescale_factor, fy=rescale_factor,
++                                   interpolation=cv2.INTER_LANCZOS4))
++            depth = cv2.resize(np.array(depth), None, fx=rescale_factor, fy=rescale_factor,
++                                   interpolation=cv2.INTER_NEAREST_EXACT)
++
++            # Save rotated image to target location
++            img.save(target_scene_root / rel_target_image_path)
++
++            # Save rotated depth to target location
++            store_data(
++                target_scene_root / rel_depth_out_path,
++                torch.tensor(depth),
++                "depth",
++            )
++
++        height, width = depth.shape
+ 
+         # Store WAI frame metadata
+         wai_frame = {
+@@ -634,10 +655,10 @@
+             "transform_matrix": c2w_pose.tolist(),
+             "h": height,
+             "w": width,
+-            "fl_x": float(fx),
+-            "fl_y": float(fy),
+-            "cx": float(cx),
+-            "cy": float(cy),
++            "fl_x": float(fx) * rescale_factor,
++            "fl_y": float(fy) * rescale_factor,
++            "cx": float(cx) * rescale_factor,
++            "cy": float(cy) * rescale_factor,
+             "is_portrait": str(is_portrait),
+         }
+         wai_frames.append(wai_frame)
+diff --git a/data_processing/aggregate_scene_names.py b/data_processing/aggregate_scene_names.py
+--- a/data_processing/aggregate_scene_names.py
++++ b/data_processing/aggregate_scene_names.py
+@@ -14,19 +14,21 @@
+ from typing import List, Optional, Set, Union
+ 
+ import numpy as np
+-import pandas as pd
+ from natsort import natsorted
+ from tqdm import tqdm
+ 
+ from mapanything.datasets.utils.data_splits import (
+-    BlendedMVSSplits,
+-    DL3DV10KSplits,
+-    ETH3DSplits,
+     MegaDepthSplits,
+-    MPSDSplits,
+-    ScanNetPPSplits,
+-    SpringSplits,
+-    TartanAirV2Splits,
++    ETH3DSplits,
++    OSDSplits,
++    KITTISplits,
++    NuscenesSplits,
++    SevenScenesSplits,
++    ArgoverseSplits,
++    WildRGBDSplits,
++    ScannetPPVGGSplits,
++    GrandTourSplits,
++    PandasetSplits,
+ )
+ from mapanything.utils.misc import seed_everything
+ from mapanything.utils.wai.scene_frame import get_scene_names
+@@ -207,487 +209,243 @@
+                 self._process_split("train", train_scenes)
+ 
+ 
+-class RandomSplitAggregator(DatasetAggregator):
+-    """Aggregator for datasets with random splits."""
+-
+-    def aggregate(self, val_ratio: float = 0.05):
+-        """Aggregate the dataset with random splits."""
+-        # Create a val split by randomly selecting scenes
+-        all_scenes_list = list(self.all_scenes)
+-        num_val_scenes = max(1, int(len(all_scenes_list) * val_ratio))
+-        val_scenes = np.random.choice(all_scenes_list, num_val_scenes, replace=False)
+-        val_scenes = set(val_scenes)
+-
+-        # Remove val scenes from all scenes
+-        self.all_scenes -= val_scenes
+-
+-        # Process val split
+-        self._process_split("val", natsorted(list(val_scenes)))
+-
+-        # Process train split
+-        train_scenes = natsorted(list(self.all_scenes))
+-        self._process_split("train", train_scenes)
+-
+-
+-class ASEAggregator(RandomSplitAggregator):
+-    """Aggregator for ASE dataset."""
++class ETH3DAggregator(DatasetAggregator):
++    """Aggregator for ETH3D dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="ase",
++            dataset_name="eth3d",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
++        self.dataset_split_info = ETH3DSplits()
+ 
++    def aggregate(self):
++        """Aggregate the ETH3D dataset."""
++        super().aggregate(test_split_scenes=self.dataset_split_info.test_split_scenes)
+ 
+-class BlendedMVSAggregator(DatasetAggregator):
+-    """Aggregator for BlendedMVS dataset."""
++
++class MegaDepthAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="blendedmvs",
++            dataset_name="megadepth",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
+-        self.dataset_split_info = BlendedMVSSplits()
++        self.dataset_split_info = MegaDepthSplits()
+ 
+     def aggregate(self):
+-        """Aggregate the BlendedMVS dataset."""
+-        super().aggregate(
+-            val_split_scenes=self.dataset_split_info.val_split_scenes,
+-            train_split_scenes=self.dataset_split_info.train_split_scenes,
+-        )
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class DL3DVAggregator(DatasetAggregator):
+-    """Aggregator for DL3DV-10K dataset."""
++class OSDAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+-    def __init__(
+-        self,
+-        root_dir,
+-        output_dir,
+-        covisibility_version_key="v0_mvsa_based",
+-        raw_data_root_dir=None,
+-    ):
++    def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="dl3dv",
++            dataset_name="osd",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+-            raw_data_root_dir=raw_data_root_dir,
+-            depth_folder="mvsanywhere/v0/depth",
++            depth_folder="depth",
+         )
+-        self.dataset_split_info = DL3DV10KSplits()
++        self.dataset_split_info = OSDSplits()
+ 
+     def aggregate(self):
+-        """Aggregate the DL3DV-10K dataset."""
+-        # Load benchmark metadata
+-        benchmark_metadata = pd.read_csv(
+-            os.path.join(self.raw_data_root_dir, "benchmark-meta.csv")
+-        )
+-        scene_split_info = pd.read_csv(
+-            os.path.join(self.raw_data_root_dir, "DL3DV-valid.csv")
+-        )
+-
+-        # Get the hash of val scenes
+-        val_scenes_hash = benchmark_metadata["hash"].tolist()
+-
+-        # Create a mapping from hash to batch
+-        hash_to_batch = dict(zip(scene_split_info["hash"], scene_split_info["batch"]))
+-
+-        # Create the scene names in format 'batch_hash'
+-        val_scenes = [f"{hash_to_batch.get(h, 'unknown')}_{h}" for h in val_scenes_hash]
+-
+-        # Check if all val scenes are present in the WAI root directory and filter out missing ones
+-        valid_val_scenes = []
+-        for scene in val_scenes:
+-            scene_path = os.path.join(self.root_dir, scene)
+-            if os.path.exists(scene_path):
+-                valid_val_scenes.append(scene)
+-
+-        # Aggregate the DL3DV-10K dataset with the constructed valid val scenes
+-        val_scenes = valid_val_scenes
+-        super().aggregate(val_split_scenes=val_scenes)
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class DynamicReplicaAggregator(RandomSplitAggregator):
+-    """Aggregator for Dynamic Replica dataset."""
++class KITTIAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="dynamicreplica",
++            dataset_name="kitti",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
++        self.dataset_split_info = KITTISplits()
+ 
++    def aggregate(self):
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+-class ETH3DAggregator(DatasetAggregator):
+-    """Aggregator for ETH3D dataset."""
++
++class NuscenesAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="eth3d",
++            dataset_name="nuscenes",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
+-        self.dataset_split_info = ETH3DSplits()
++        self.dataset_split_info = NuscenesSplits()
+ 
+     def aggregate(self):
+-        """Aggregate the ETH3D dataset."""
+-        super().aggregate(test_split_scenes=self.dataset_split_info.test_split_scenes)
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class MegaDepthAggregator(DatasetAggregator):
++class SevenScenesAggregator(DatasetAggregator):
+     """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="megadepth",
++            dataset_name="7scenes",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
+-        self.dataset_split_info = MegaDepthSplits()
++        self.dataset_split_info = SevenScenesSplits()
+ 
+     def aggregate(self):
+         """Aggregate the MegaDepth dataset."""
+         super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class MPSDAggregator(DatasetAggregator):
+-    """Aggregator for MPSD dataset."""
++class ArgoverseAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+-    def __init__(
+-        self,
+-        root_dir,
+-        output_dir,
+-        covisibility_version_key="v0",
+-        raw_data_root_dir=None,
+-    ):
++    def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="mpsd",
++            dataset_name="argoverse",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+-            raw_data_root_dir=raw_data_root_dir,
+             depth_folder="depth",
+         )
+-        self.dataset_split_info = MPSDSplits()
++        self.dataset_split_info = ArgoverseSplits()
+ 
+     def aggregate(self):
+-        """Aggregate the MPSD dataset."""
+-        assert (
+-            self.dataset_split_info.val_split_scenes
+-            == "load_numpy_file_with_val_scenes"
+-        )
+-        assert self.raw_data_root_dir is not None, (
+-            "raw_data_root_dir must be provided for MPSD dataset"
+-        )
+-
+-        # Load val scenes from numpy file
+-        val_scenes = np.load(
+-            os.path.join(self.raw_data_root_dir, "val_recon_folder_names.npy")
+-        )
+-        val_scenes = {scene.replace("/", "_") for scene in val_scenes}
+-
+-        super().aggregate(val_split_scenes=val_scenes)
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class MVSSynthAggregator(RandomSplitAggregator):
+-    """Aggregator for MVS Synth dataset."""
++class WildRGBDAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="mvs_synth",
++            dataset_name="wildrgbd",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
++        self.dataset_split_info = WildRGBDSplits()
+ 
+-
+-class ParallelDomain4DAggregator(RandomSplitAggregator):
+-    """Aggregator for Parallel Domain 4D dataset."""
+-
+-    def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+-        super().__init__(
+-            dataset_name="paralleldomain4d",
+-            root_dir=root_dir,
+-            output_dir=output_dir,
+-            covisibility_version_key=covisibility_version_key,
+-            depth_folder="depth",
+-        )
++    def aggregate(self):
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class SAILVOS3DAggregator(RandomSplitAggregator):
+-    """Aggregator for SAIL-VOS 3D dataset."""
++class ScannetPPVGGAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="sailvos3d",
++            dataset_name="scannetppvgg",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
+-
+-
+-class ScanNetPPV2Aggregator(DatasetAggregator):
+-    """Aggregator for ScanNet++V2 dataset."""
+-
+-    def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+-        super().__init__(
+-            dataset_name="scannetppv2",
+-            root_dir=root_dir,
+-            output_dir=output_dir,
+-            covisibility_version_key=covisibility_version_key,
+-            depth_folder="rendered_depth",
+-        )
+-        self.dataset_split_info = ScanNetPPSplits()
++        self.dataset_split_info = ScannetPPVGGSplits()
+ 
+     def aggregate(self):
+-        """Aggregate the ScanNet++V2 dataset."""
+-        super().aggregate(
+-            val_split_scenes=self.dataset_split_info.val_split_scenes,
+-            test_split_scenes=self.dataset_split_info.test_split_scenes,
+-        )
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class SpringAggregator(DatasetAggregator):
+-    """Aggregator for Spring dataset."""
++class GrandTourAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="spring",
++            dataset_name="grand_tour",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
+-        self.dataset_split_info = SpringSplits()
++        self.dataset_split_info = GrandTourSplits()
+ 
+     def aggregate(self):
+-        """Aggregate the Spring dataset."""
++        """Aggregate the MegaDepth dataset."""
+         super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+ 
+-class TartanAirV2Aggregator(DatasetAggregator):
+-    """Aggregator for TartanAirV2-WB dataset."""
++class PandasetAggregator(DatasetAggregator):
++    """Aggregator for MegaDepth dataset."""
+ 
+     def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+         super().__init__(
+-            dataset_name="tav2_wb",
++            dataset_name="pandaset",
+             root_dir=root_dir,
+             output_dir=output_dir,
+             covisibility_version_key=covisibility_version_key,
+             depth_folder="depth",
+         )
+-        self.dataset_split_info = TartanAirV2Splits()
++        self.dataset_split_info = PandasetSplits()
+ 
+     def aggregate(self):
+-        """Aggregate the TartanAirV2-WB dataset."""
+-        super().aggregate(
+-            val_split_scenes=self.dataset_split_info.val_split_scenes,
+-            test_split_scenes=self.dataset_split_info.test_split_scenes,
+-        )
+-
++        """Aggregate the MegaDepth dataset."""
++        super().aggregate(val_split_scenes=self.dataset_split_info.val_split_scenes)
+ 
+-class UnrealStereo4KAggregator(RandomSplitAggregator):
+-    """Aggregator for Unreal Stereo 4K dataset."""
+ 
+-    def __init__(self, root_dir, output_dir, covisibility_version_key="v0"):
+-        super().__init__(
+-            dataset_name="unrealstereo4k",
+-            root_dir=root_dir,
+-            output_dir=output_dir,
+-            covisibility_version_key=covisibility_version_key,
+-            depth_folder="depth",
+-        )
++AGGREGATORS = {
++    "megadepth": MegaDepthAggregator,
++    "eth3d": ETH3DAggregator,
++    "osd": OSDAggregator,
++    "kitti": KITTIAggregator,
++    "nuscenes": NuscenesAggregator,
++    "7scenes": SevenScenesAggregator,
++    "argoverse": ArgoverseAggregator,
++    "wildrgbd": WildRGBDAggregator,
++    "scannetppvgg": ScannetPPVGGAggregator,
++    "grand_tour": GrandTourAggregator,
++    "pandaset": PandasetAggregator,
++}
+ 
+ 
+ def main():
+-    """Main function to parse arguments and aggregate scene lists."""
+-    # Seed the random number generator
++    """Write <output_dir>/<split>/<dataset>_scene_list_<split>.npy for each dataset."""
+     seed_everything(42)
+ 
+-    # Setup args
+     parser = argparse.ArgumentParser()
+-    parser.add_argument(
+-        "--wai_root",
+-        type=str,
+-        help="Path to the root of WAI format datasets",
+-        default="/fsx/xrtech/data",
+-    )
+-    parser.add_argument(
+-        "--raw_data_root",
+-        type=str,
+-        help="Path to the root of raw datasets from WAI is processed",
+-        default="/fsx/xrtech/raw_data",
+-    )
+-    parser.add_argument(
+-        "--output_dir",
+-        type=str,
+-        help="Path to the output directory",
+-        default="/fsx/nkeetha/mapanything_dataset_metadata",
+-    )
+-    parser.add_argument(
+-        "--datasets",
+-        type=str,
+-        nargs="+",
+-        help="Names of the datasets to process",
+-        default=[
+-            "ase",
+-            "blendedmvs",
+-            "dl3dv",
+-            "dynamicreplica",
+-            "eth3d",
+-            "megadepth",
+-            "mpsd",
+-            "mvs_synth",
+-            "paralleldomain4d",
+-            "sailvos3d",
+-            "scannetppv2",
+-            "spring",
+-            "tav2_wb",
+-            "unrealstereo4k",
+-        ],
+-        choices=[
+-            "ase",
+-            "blendedmvs",
+-            "dl3dv",
+-            "dynamicreplica",
+-            "eth3d",
+-            "megadepth",
+-            "mpsd",
+-            "mvs_synth",
+-            "paralleldomain4d",
+-            "sailvos3d",
+-            "scannetppv2",
+-            "spring",
+-            "tav2_wb",
+-            "unrealstereo4k",
+-        ],
+-    )
+-    parser.add_argument(
+-        "--print_stats",
+-        action="store_true",
+-        help="Print statistics for the number of scenes in each dataset split",
+-    )
+-
++    parser.add_argument("--wai_root", type=str, required=True, help="Root of the WAI-format datasets")
++    parser.add_argument("--output_dir", type=str, required=True, help="Metadata directory (machine.metadata_dir)")
++    parser.add_argument("--datasets", type=str, nargs="+", default=None, choices=list(AGGREGATORS),
++                        help="Datasets to process (default: every dataset with a folder under --wai_root)")
++    parser.add_argument("--print_stats", action="store_true",
++                        help="Print the number of scenes in each dataset split and exit")
+     args = parser.parse_args()
+ 
+-    # Create output Directory
+-    os.makedirs(args.output_dir, exist_ok=True)
++    if args.datasets is None:
++        args.datasets = [d for d in AGGREGATORS if os.path.isdir(os.path.join(args.wai_root, d))]
++        print(f"Datasets found under {args.wai_root}: {', '.join(args.datasets) or 'none'}")
+ 
+-    # If print_stats flag is set, print statistics and exit
++    os.makedirs(args.output_dir, exist_ok=True)
+     if args.print_stats:
+         print_dataset_stats(args.output_dir, args.datasets)
+         return
+ 
+-    # Process each specified dataset
+     for dataset in tqdm(args.datasets):
+-        # Get WAI Dataset Root Dir
+-        root_dir = os.path.join(args.wai_root, dataset)
+-
+-        if dataset == "ase":
+-            # ASE
+-            aggregator = ASEAggregator(root_dir=root_dir, output_dir=args.output_dir)
+-            aggregator.aggregate()
+-        elif dataset == "blendedmvs":
+-            # BlendedMVS
+-            aggregator = BlendedMVSAggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "dl3dv":
+-            # DL3DV-10K. Expects the following csvs at raw data root directory:
+-            # https://huggingface.co/datasets/DL3DV/DL3DV-Benchmark/raw/main/benchmark-meta.csv
+-            # https://raw.githubusercontent.com/DL3DV-10K/Dataset/main/cache/DL3DV-valid.csv
+-            raw_data_root_dir = os.path.join(
+-                args.raw_data_root, "DL3DV_10K_4K_resolution"
+-            )
+-            aggregator = DL3DVAggregator(
+-                root_dir=root_dir,
+-                output_dir=args.output_dir,
+-                raw_data_root_dir=raw_data_root_dir,
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "dynamicreplica":
+-            # Dynamic Replica
+-            aggregator = DynamicReplicaAggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "eth3d":
+-            # ETH3D
+-            aggregator = ETH3DAggregator(root_dir=root_dir, output_dir=args.output_dir)
+-            aggregator.aggregate()
+-        elif dataset == "megadepth":
+-            # MegaDepth
+-            aggregator = MegaDepthAggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "mpsd":
+-            # MPSD
+-            raw_data_root_dir = os.path.join(args.raw_data_root, "mpsd")
+-            aggregator = MPSDAggregator(
+-                root_dir=root_dir,
+-                output_dir=args.output_dir,
+-                raw_data_root_dir=raw_data_root_dir,
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "mvs_synth":
+-            # MVS Synth
+-            aggregator = MVSSynthAggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "paralleldomain4d":
+-            # Parallel Domain 4D
+-            aggregator = ParallelDomain4DAggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "sailvos3d":
+-            # SAIL-VOS 3D
+-            aggregator = SAILVOS3DAggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "scannetppv2":
+-            # ScanNet++V2
+-            aggregator = ScanNetPPV2Aggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "spring":
+-            # Spring
+-            aggregator = SpringAggregator(root_dir=root_dir, output_dir=args.output_dir)
+-            aggregator.aggregate()
+-        elif dataset == "tav2_wb":
+-            # TartanAirV2-WB
+-            aggregator = TartanAirV2Aggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        elif dataset == "unrealstereo4k":
+-            # Unreal Stereo 4K
+-            aggregator = UnrealStereo4KAggregator(
+-                root_dir=root_dir, output_dir=args.output_dir
+-            )
+-            aggregator.aggregate()
+-        else:
+-            print(f"Dataset {dataset} not implemented yet")
++        AGGREGATORS[dataset](root_dir=os.path.join(args.wai_root, dataset), output_dir=args.output_dir).aggregate()
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/data_processing/wai_processing/utils/state.py b/data_processing/wai_processing/utils/state.py
+--- a/data_processing/wai_processing/utils/state.py
++++ b/data_processing/wai_processing/utils/state.py
+@@ -3,6 +3,7 @@
+ # This source code is licensed under the Apache License, Version 2.0
+ # found in the LICENSE file in the root directory of this source tree.
+ 
++import importlib.metadata
+ import logging
+ import os
+ import subprocess
+@@ -10,7 +11,6 @@
+ from datetime import datetime
+ from pathlib import Path
+ 
+-import pkg_resources
+ import portalocker
+ from portalocker.exceptions import LockException
+ 
+@@ -73,10 +73,8 @@
+         if Path(package).exists():
+             location = package
+         else:
+-            # Get the distribution object for the package
+-            dist = pkg_resources.get_distribution(package)
+-            # Get the location of the package
+-            location = dist.location
++            # Get the location of the installed package
++            location = importlib.metadata.distribution(package).locate_file("")
+         # Run the git command to get the commit hash
+         commit_hash = (
+             subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=location)
+@@ -90,7 +88,7 @@
+         ):
+             commit_hash += "-dirty"
+         return commit_hash
+-    except pkg_resources.DistributionNotFound:
++    except importlib.metadata.PackageNotFoundError:
+         logger.error(f"Package {package} not found.")
+         return None
+     except subprocess.CalledProcessError:

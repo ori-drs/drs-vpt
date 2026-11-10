@@ -1,0 +1,19 @@
+# DRS VPT training config. The training scripts are in bash_scripts/train/ (see train.md).
+# The defaults fine-tune the released weights (model.pretrained=fulkast/drs_vpt) with the settings they were trained with.
+defaults:
+  - machine: local
+  - model: drs-vpt
+  - dataset: drs_vpt
+  - loss: drs_vpt
+  - train_params: drs_vpt
+  - distributed: default
+  - wandb: default
+  - _self_
+output_dir: "${hydra:run.dir}"
+root_data_dir: "${machine.root_data_dir}"
+mapanything_dataset_metadata_dir: "${machine.metadata_dir}"
+hydra:
+  run:
+    dir: "${machine.root_experiments_dir}/${now:%Y-%m-%d_%H-%M-%S}"
+  job:
+    chdir: false

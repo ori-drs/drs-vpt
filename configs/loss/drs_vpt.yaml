@@ -1,0 +1,11 @@
+# Training and validation criteria (drs_vpt/train/losses.py).
+train_criterion: ConfAndExcludeTopNPercentPixelLoss(FactoredGeometryScaleRegr3DPlusNormalGMLoss(RobustRegressionLoss(alpha=0.5,
+  scaling_c=0.05), norm_mode='avg_dis', apply_normal_and_gm_loss_to_synthetic_data_only=True, cam_frame_points_loss_weight=0.1,
+  depth_loss_weight=0.1, ray_directions_loss_weight=0.1, pose_quats_loss_weight=0.1, pose_trans_loss_weight=0.1, scale_loss_weight=1.0,
+  world_frame_points_loss_weight=1, normal_loss_weight=0.3, gm_loss_weight=0.3), conf_alpha=0.2, top_n_percent=5,
+  apply_to_real_data_only=True, conf_loss_set_indices=[0, 3], exclude_loss_set_indices=[1, 2]) + 0.03 * NonAmbiguousMaskLoss(BCELoss())
+test_criterion: ExcludeTopNPercentPixelLoss(FactoredGeometryScaleRegr3DPlusNormalGMLoss(RobustRegressionLoss(alpha=0.5, scaling_c=0.05),
+  norm_mode='avg_dis', apply_normal_and_gm_loss_to_synthetic_data_only=True, cam_frame_points_loss_weight=0.1,
+  depth_loss_weight=0.1, ray_directions_loss_weight=0.1, pose_quats_loss_weight=0.1, pose_trans_loss_weight=0.1, scale_loss_weight=0.1,
+  world_frame_points_loss_weight=1, normal_loss_weight=0.3, gm_loss_weight=0.3), top_n_percent=5, apply_to_real_data_only=True,
+  loss_set_indices=[0, 1, 2, 3]) + 0.03 * NonAmbiguousMaskLoss(BCELoss())

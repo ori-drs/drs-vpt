@@ -1,0 +1,10 @@
+original_root: # path of the raw dataset (see data_processing/README.md)
+root: # path of the WAI-format output
+
+dataset_name: argoverse
+version: 0.1
+overwrite: True
+seed: 0 # for the subsampling to 90 frames per camera
+
+scene_filters:
+  - process_state_not: [conversion, finished]

@@ -1,0 +1,28 @@
+# The data mix the released model was trained with.
+defaults:
+  - default
+
+train_dataset:
+  "+ 140_000 @ ${dataset.megadepth_wai.train.dataset_str}
+  + 140_000 @ ${dataset.scannetppvgg_wai.train.dataset_str}
+  + 5_000 @ ${dataset.pandaset_wai.train.dataset_str}
+  + 50_000 @ ${dataset.nuscenes_wai.train.dataset_str}
+  + 100_000 @ ${dataset.seven_scenes_wai.train.dataset_str}
+  + 140_000 @ ${dataset.kitti_wai.train.dataset_str}
+  + 10_000 @ ${dataset.grandtour_wai.train.dataset_str}
+  + 50_000 @ ${dataset.argoverse_wai.train.dataset_str}
+  + 10_000 @ ${dataset.osd_wai.train.dataset_str}
+  + 10_000 @ ${dataset.eth3d_wai.train.dataset_str}
+  + 50_000 @ ${dataset.wildrgbd_wai.train.dataset_str}"
+
+test_dataset:
+  "+ 1_000 @ ${dataset.seven_scenes_wai.val.dataset_str}
+  + 1_000 @ ${dataset.pandaset_wai.val.dataset_str}
+  + 1_000 @ ${dataset.scannetppvgg_wai.val.dataset_str}
+  + 1_000 @ ${dataset.kitti_wai.val.dataset_str}
+  + 1_000 @ ${dataset.nuscenes_wai.val.dataset_str}
+  + 1_000 @ ${dataset.megadepth_wai.val.dataset_str}
+  + 1_000 @ ${dataset.grandtour_wai.val.dataset_str}
+  + 1_000 @ ${dataset.osd_wai.val.dataset_str}
+  + 1_000 @ ${dataset.argoverse_wai.val.dataset_str}
+  + 1_000 @ ${dataset.wildrgbd_wai.val.dataset_str}"

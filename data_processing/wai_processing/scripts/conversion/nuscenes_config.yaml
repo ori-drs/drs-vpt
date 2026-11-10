@@ -1,0 +1,10 @@
+original_root: # path of the raw dataset (see data_processing/README.md)
+root: # path of the WAI-format output
+
+dataset_name: nuscenes
+version: 0.1
+overwrite: True
+max_samples: # convert only the first N samples (sorted by name)
+
+scene_filters:
+  - process_state_not: [conversion, finished]

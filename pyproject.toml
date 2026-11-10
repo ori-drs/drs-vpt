@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drs-vpt"
+version = "1.0.0"
+description = "DRS VPT: localize a single camera image inside a point cloud map"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+# spconv and torch-scatter (Sonata's sparse ops) depend on your platform and CUDA version; see README.md.
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "scipy",
+    "pillow",
+    "opencv-python<5",  # the 5.x wheels are built without OpenEXR, which the WAI depth maps need
+    "huggingface_hub",
+    "safetensors",
+    "timm",
+    "einops",
+    "addict",
+    "jaxtyping",
+    "pyyaml",
+    "hydra-core",
+    "omegaconf",
+    "matplotlib",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+viz = ["pyvista", "trimesh"]
+train = ["tensorboard", "wandb", "plyfile", "orjson"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["drs_vpt*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.patch", "LICENSE*"]
