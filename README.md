@@ -4,11 +4,11 @@ DRS-VPT localizes a single camera image inside a 3-D point cloud map, with no po
 LiDAR scans and indoor maps. It also calibrates a camera to a LiDAR without targets.
 
 <p>
-  <a href="https://ori-drs.github.io/drs-vpt-pages/"><img src="https://img.shields.io/badge/Project-Page-0c1e45" alt="Project page"></a>
-  <a href="https://arxiv.org/abs/2609.12557"><img src="https://img.shields.io/badge/arXiv-2609.12557-b31b1b?logo=arxiv&amp;logoColor=white" alt="arXiv"></a>
-  <a href="https://eccv.ecva.net/virtual/2026/poster/5967"><img src="https://img.shields.io/badge/ECCV-2026-1f6feb" alt="ECCV 2026"></a>
-  <a href="https://huggingface.co/spaces/fulkast/drs-vpt-demo"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Demo-Hugging%20Face-ffcc4d" alt="Hugging Face demo"></a>
-  <a href="https://huggingface.co/fulkast/drs-vpt"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Weights-Hugging%20Face-ffcc4d" alt="Hugging Face weights"></a>
+  <a href="https://ori-drs.github.io/drs-vpt-pages/"><img src="https://img.shields.io/badge/Project-Page-2b6cb0?logo=googlechrome&amp;logoColor=white" alt="Project page"></a>&nbsp;
+  <a href="https://arxiv.org/abs/2609.12557"><img src="https://img.shields.io/badge/arXiv-2609.12557-b31b1b?logo=arxiv&amp;logoColor=white" alt="arXiv"></a>&nbsp;
+  <a href="https://eccv.ecva.net/virtual/2026/poster/5967"><img src="https://img.shields.io/badge/ECCV-2026-1f6feb" alt="ECCV 2026"></a>&nbsp;
+  <a href="https://huggingface.co/spaces/fulkast/drs-vpt-demo"><img src="https://img.shields.io/badge/Demo-Hugging%20Face%20Space-ff9d00?logo=huggingface&amp;logoColor=white" alt="Hugging Face demo"></a>&nbsp;
+  <a href="https://huggingface.co/fulkast/drs-vpt"><img src="https://img.shields.io/badge/Weights-Hugging%20Face-ff9d00?logo=huggingface&amp;logoColor=white" alt="Hugging Face weights"></a>
 </p>
 
 <p align="center">
