@@ -3,11 +3,19 @@
 DRS-VPT localizes a single camera image inside a 3-D point cloud map, with no pose prior. One model works for driving
 LiDAR scans and indoor maps. It also calibrates a camera to a LiDAR without targets.
 
-[Project page](https://ori-drs.github.io/drs-vpt-pages/) · [ECCV 2026](https://eccv.ecva.net/virtual/2026/poster/5967)
+<p align="center">
+  <a href="https://ori-drs.github.io/drs-vpt-pages/"><img src="https://img.shields.io/badge/Project-Page-2b6cb0?logo=googlechrome&amp;logoColor=white" alt="Project page"></a>&nbsp;
+  <a href="https://arxiv.org/abs/2609.12557"><img src="https://img.shields.io/badge/arXiv-2609.12557-b31b1b?logo=arxiv&amp;logoColor=white" alt="arXiv"></a>&nbsp;
+  <a href="https://eccv.ecva.net/virtual/2026/poster/5967"><img src="https://img.shields.io/badge/ECCV-2026-1f6feb" alt="ECCV 2026"></a>&nbsp;
+  <a href="https://huggingface.co/spaces/fulkast/drs-vpt-demo"><img src="assets/readme/badge-demo.svg" height="20" alt="Try demo online!"></a>
+</p>
+
+**Try it in your browser:** upload a photo and a point cloud of the same place, and see the camera placed in the map. No
+install needed: [DRS-VPT demo on Hugging Face](https://huggingface.co/spaces/fulkast/drs-vpt-demo).
 
 <p align="center">
-  <img src="assets/readme/hero.gif" width="100%"
-       alt="DRS-VPT localizing a KITTI camera image in a LiDAR scan: the inputs (image and unposed scan), the camera pose read from each transformer block and then refined coarse to fine, with the scan painted by the image once the pose converges, and the scan projected into the image at each pose">
+  <a href="https://huggingface.co/spaces/fulkast/drs-vpt-demo"><img src="assets/readme/hero.gif" width="100%"
+       alt="DRS-VPT localizing a KITTI camera image in a LiDAR scan: the inputs (image and unposed scan), the camera pose read from each transformer block and then refined coarse to fine, with the scan painted by the image once the pose converges, and the scan projected into the image at each pose"></a>
 </p>
 
 ## Install
