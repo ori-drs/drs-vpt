@@ -7,7 +7,7 @@ LiDAR scans and indoor maps. It also calibrates a camera to a LiDAR without targ
   <a href="https://ori-drs.github.io/drs-vpt-pages/"><img src="https://img.shields.io/badge/Project-Page-2b6cb0?logo=googlechrome&amp;logoColor=white" alt="Project page"></a>&nbsp;
   <a href="https://arxiv.org/abs/2609.12557"><img src="https://img.shields.io/badge/arXiv-2609.12557-b31b1b?logo=arxiv&amp;logoColor=white" alt="arXiv"></a>&nbsp;
   <a href="https://eccv.ecva.net/virtual/2026/poster/5967"><img src="https://img.shields.io/badge/ECCV-2026-1f6feb" alt="ECCV 2026"></a>&nbsp;
-  <a href="https://huggingface.co/spaces/fulkast/drs-vpt-demo"><img src="https://img.shields.io/badge/Demo-Hugging%20Face%20Space-ff9d00?logo=huggingface&amp;logoColor=white" alt="Hugging Face demo"></a>&nbsp;
+  <a href="https://huggingface.co/spaces/fulkast/drs-vpt-demo"><img src="https://img.shields.io/badge/Try%20demo%20online%21-ff9d00?logo=huggingface&amp;logoColor=white" alt="Try demo online!"></a>&nbsp;
   <a href="https://huggingface.co/fulkast/drs-vpt"><img src="https://img.shields.io/badge/Weights-Hugging%20Face-ff9d00?logo=huggingface&amp;logoColor=white" alt="Hugging Face weights"></a>
 </p>
 
