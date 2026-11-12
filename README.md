@@ -11,9 +11,12 @@ LiDAR scans and indoor maps. It also calibrates a camera to a LiDAR without targ
   <a href="https://huggingface.co/fulkast/drs-vpt"><img src="https://img.shields.io/badge/Weights-Hugging%20Face-ff9d00?logo=huggingface&amp;logoColor=white" alt="Hugging Face weights"></a>
 </p>
 
+**Try it in your browser:** upload a photo and a point cloud of the same place, and see the camera placed in the map. No
+install needed: [DRS-VPT demo on Hugging Face](https://huggingface.co/spaces/fulkast/drs-vpt-demo).
+
 <p align="center">
-  <img src="assets/readme/hero.gif" width="100%"
-       alt="DRS-VPT localizing a KITTI camera image in a LiDAR scan: the inputs (image and unposed scan), the camera pose read from each transformer block and then refined coarse to fine, with the scan painted by the image once the pose converges, and the scan projected into the image at each pose">
+  <a href="https://huggingface.co/spaces/fulkast/drs-vpt-demo"><img src="assets/readme/hero.gif" width="100%"
+       alt="DRS-VPT localizing a KITTI camera image in a LiDAR scan: the inputs (image and unposed scan), the camera pose read from each transformer block and then refined coarse to fine, with the scan painted by the image once the pose converges, and the scan projected into the image at each pose"></a>
 </p>
 
 ## Install
